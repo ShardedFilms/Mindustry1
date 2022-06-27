@@ -21,7 +21,7 @@ import static mindustry.Vars.*;
 public class ConsoleFragment extends Table{
     private static final int messagesShown = 30;
     private Seq<String> messages = new Seq<>();
-    private boolean open = false, shown;
+    private boolean open = true, shown = true;
     private TextField chatfield;
     private Label fieldlabel = new Label(">");
     private Font font;
