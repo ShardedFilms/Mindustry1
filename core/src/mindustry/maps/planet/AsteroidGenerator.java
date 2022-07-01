@@ -158,6 +158,6 @@ public class AsteroidGenerator extends BlankPlanetGenerator{
 
     @Override
     public int getSectorSize(Sector sector){
-        return 500;
+        return 800;
     }
 }
