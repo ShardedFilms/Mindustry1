@@ -10,6 +10,7 @@ import arc.scene.ui.layout.*;
 import arc.util.*;
 import mindustry.core.GameState.*;
 import mindustry.ctype.*;
+import mindustry.game.*;
 import mindustry.gen.*;
 import mindustry.graphics.*;
 import mindustry.logic.LExecutor.*;
@@ -36,6 +37,49 @@ public class LogicDialog extends BaseDialog{
 
         addCloseListener();
 
+        shown(this::setup);
+        hidden(() -> consumer.get(canvas.save()));
+        onResize(() -> {
+            setup();
+            canvas.rebuild();
+        });
+
+        add(canvas).grow().name("canvas");
+
+        row();
+
+        add(buttons).growX().name("canvas");
+    }
+
+    private Color typeColor(Var s, Color color){
+        return color.set(
+            !s.isobj ? Pal.place :
+            s.objval == null ? Color.darkGray :
+            s.objval instanceof String ? Pal.ammo :
+            s.objval instanceof Content ? Pal.logicOperations :
+            s.objval instanceof Building ? Pal.logicBlocks :
+            s.objval instanceof Unit ? Pal.logicUnits :
+            s.objval instanceof Team ? Pal.logicUnits :
+            s.objval instanceof Enum<?> ? Pal.logicIo :
+            Color.white
+        );
+    }
+
+    private String typeName(Var s){
+        return
+            !s.isobj ? "number" :
+            s.objval == null ? "null" :
+            s.objval instanceof String ? "string" :
+            s.objval instanceof Content ? "content" :
+            s.objval instanceof Building ? "building" :
+            s.objval instanceof Team ? "team" :
+            s.objval instanceof Unit ? "unit" :
+            s.objval instanceof Enum<?> ? "enum" :
+            "unknown";
+    }
+
+    private void setup(){
+        buttons.clearChildren();
         buttons.defaults().size(160f, 64f);
         buttons.button("@back", Icon.left, this::hide).name("back");
 
@@ -72,13 +116,13 @@ public class LogicDialog extends BaseDialog{
         buttons.button("@variables", Icon.menu, () -> {
             BaseDialog dialog = new BaseDialog("@variables");
             dialog.hidden(() -> {
-                if(!wasPaused){
+                if(!wasPaused && !net.active()){
                     state.set(State.paused);
                 }
             });
 
             dialog.shown(() -> {
-                if(!wasPaused){
+                if(!wasPaused && !net.active()){
                     state.set(State.playing);
                 }
             });
@@ -92,26 +136,6 @@ public class LogicDialog extends BaseDialog{
 
                         Color varColor = Pal.gray;
                         float stub = 8f, mul = 0.5f, pad = 4;
-
-                        Color color =
-                            !s.isobj ? Pal.place :
-                            s.objval == null ? Color.darkGray :
-                            s.objval instanceof String ? Pal.ammo :
-                            s.objval instanceof Content ? Pal.logicOperations :
-                            s.objval instanceof Building ? Pal.logicBlocks :
-                            s.objval instanceof Unit ? Pal.logicUnits :
-                            s.objval instanceof Enum<?> ? Pal.logicIo :
-                            Color.white;
-
-                        String typeName =
-                            !s.isobj ? "number" :
-                            s.objval == null ? "null" :
-                            s.objval instanceof String ? "string" :
-                            s.objval instanceof Content ? "content" :
-                            s.objval instanceof Building ? "building" :
-                            s.objval instanceof Unit ? "unit" :
-                            s.objval instanceof Enum<?> ? "enum" :
-                            "unknown";
 
                         t.add(new Image(Tex.whiteui, varColor.cpy().mul(mul))).width(stub);
                         t.stack(new Image(Tex.whiteui, varColor), new Label(" " + s.name + " ", Styles.outlineLabel){{
@@ -138,9 +162,13 @@ public class LogicDialog extends BaseDialog{
                             label.act(1f);
                         }).padRight(pad);
 
-                        //TODO type name does not update, is this important?
-                        t.add(new Image(Tex.whiteui, color.cpy().mul(mul))).width(stub);
-                        t.stack(new Image(Tex.whiteui, color), new Label(" " + typeName + " ", Styles.outlineLabel));
+                        t.add(new Image(Tex.whiteui, typeColor(s, new Color()).mul(mul))).update(i -> i.setColor(typeColor(s, i.color).mul(mul))).width(stub);
+
+                        t.stack(new Image(Tex.whiteui, typeColor(s, new Color())){{
+                            update(() -> setColor(typeColor(s, color)));
+                        }}, new Label(() -> " " + typeName(s) + " "){{
+                            setStyle(Styles.outlineLabel);
+                        }});
 
                         t.row();
 
@@ -197,17 +225,6 @@ public class LogicDialog extends BaseDialog{
             dialog.addCloseButton();
             dialog.show();
         }).disabled(t -> canvas.statements.getChildren().size >= LExecutor.maxInstructions);
-
-
-        add(canvas).grow().name("canvas");
-
-        row();
-
-        add(buttons).growX().name("canvas");
-
-        hidden(() -> consumer.get(canvas.save()));
-
-        onResize(() -> canvas.rebuild());
     }
 
     public void show(String code, LExecutor executor, boolean privileged, Cons<String> modified){

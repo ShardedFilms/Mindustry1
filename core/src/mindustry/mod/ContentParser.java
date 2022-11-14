@@ -16,6 +16,7 @@ import arc.util.serialization.*;
 import arc.util.serialization.Json.*;
 import arc.util.serialization.Jval.*;
 import mindustry.*;
+import mindustry.ai.*;
 import mindustry.ai.types.*;
 import mindustry.content.*;
 import mindustry.content.TechTree.*;
@@ -79,6 +80,7 @@ public class ContentParser{
         put(Blending.class, (type, data) -> field(Blending.class, data));
         put(CacheLayer.class, (type, data) -> field(CacheLayer.class, data));
         put(Attribute.class, (type, data) -> Attribute.get(data.asString()));
+        put(BuildVisibility.class, (type, data) -> field(BuildVisibility.class, data));
         put(Schematic.class, (type, data) -> {
             Object result = fieldOpt(Loadouts.class, data);
             if(result != null){
@@ -103,6 +105,18 @@ public class ContentParser{
             effect.minfo.mod = currentMod;
             readFields(effect, data);
             return effect;
+        });
+        put(UnitCommand.class, (type, data) -> {
+            if(data.isString()){
+               var cmd = UnitCommand.all.find(u -> u.name.equals(data.asString()));
+               if(cmd != null){
+                   return cmd;
+               }else{
+                   throw new IllegalArgumentException("Unknown unit command name: " + data.asString());
+               }
+            }else{
+                throw new IllegalArgumentException("Unit commands must be strings.");
+            }
         });
         put(BulletType.class, (type, data) -> {
             if(data.isString()){
@@ -188,13 +202,14 @@ public class ContentParser{
                 case "delay" -> base.delay(data.getFloat("amount"));
                 case "sustain" -> base.sustain(data.getFloat("offset", 0f), data.getFloat("grow", 0f), data.getFloat("sustain"));
                 case "shorten" -> base.shorten(data.getFloat("amount"));
+                case "compress" -> base.compress(data.getFloat("start"), data.getFloat("end"));
                 case "add" -> data.has("amount") ? base.add(data.getFloat("amount")) : base.add(parser.readValue(PartProgress.class, data.get("other")));
                 case "blend" -> base.blend(parser.readValue(PartProgress.class, data.get("other")), data.getFloat("amount"));
-                case "mul" -> base.mul(parser.readValue(PartProgress.class, data.get("other")));
+                case "mul" -> data.has("amount") ? base.mul(data.getFloat("amount")) : base.mul(parser.readValue(PartProgress.class, data.get("other")));
                 case "min" -> base.min(parser.readValue(PartProgress.class, data.get("other")));
-                case "sin" -> base.sin(data.getFloat("scl"), data.getFloat("mag"));
+                case "sin" -> base.sin(data.has("offset") ? data.getFloat("offset") : 0f, data.getFloat("scl"), data.getFloat("mag"));
                 case "absin" -> base.absin(data.getFloat("scl"), data.getFloat("mag"));
-                case "curve" -> base.curve(parser.readValue(Interp.class, data.get("interp")));
+                case "curve" -> data.has("interp") ? base.curve(parser.readValue(Interp.class, data.get("interp"))) : base.curve(data.getFloat("offset"), data.getFloat("duration"));
                 default -> throw new RuntimeException("Unknown operation '" + op + "', check PartProgress class for a list of methods.");
             };
         });
@@ -202,26 +217,6 @@ public class ContentParser{
             var result = new AsteroidGenerator(); //only one type for now
             readFields(result, data);
             return result;
-        });
-        put(GenericMesh.class, (type, data) -> {
-            if(!data.isObject()) throw new RuntimeException("Meshes must be objects.");
-            if(!(currentContent instanceof Planet planet)) throw new RuntimeException("Meshes can only be parsed as parts of planets.");
-
-            String tname = Strings.capitalize(data.getString("type", "NoiseMesh"));
-
-            return switch(tname){
-                //TODO NoiseMesh is bad
-                case "NoiseMesh" -> new NoiseMesh(planet,
-                    data.getInt("seed", 0), data.getInt("divisions", 1), data.getFloat("radius", 1f),
-                    data.getInt("octaves", 1), data.getFloat("persistence", 0.5f), data.getFloat("scale", 1f), data.getFloat("mag", 0.5f),
-                    Color.valueOf(data.getString("color1", data.getString("color", "ffffff"))),
-                    Color.valueOf(data.getString("color2", data.getString("color", "ffffff"))),
-                    data.getInt("colorOct", 1), data.getFloat("colorPersistence", 0.5f), data.getFloat("colorScale", 1f),
-                    data.getFloat("colorThreshold", 0.5f));
-                case "MultiMesh" -> new MultiMesh(parser.readValue(GenericMesh[].class, data.get("meshes")));
-                case "MatMesh" -> new MatMesh(parser.readValue(GenericMesh.class, data.get("mesh")), parser.readValue(Mat3D.class, data.get("mat")));
-                default -> throw new RuntimeException("Unknown mesh type: " + tname);
-            };
         });
         put(Mat3D.class, (type, data) -> {
             if(data == null) return new Mat3D();
@@ -347,6 +342,15 @@ public class ContentParser{
                     return (T)fromJson(ItemStack.class, "{item: " + split[0] + ", amount: " + split[1] + "}");
                 }
 
+                //try to parse "payloaditem/amount" syntax
+                if(type == PayloadStack.class && jsonData.isString() && jsonData.asString().contains("/")){
+                    String[] split = jsonData.asString().split("/");
+                    int number = Strings.parseInt(split[1], 1);
+                    UnlockableContent cont = content.unit(split[0]) == null ? content.block(split[0]) : content.unit(split[0]);
+
+                    return (T)new PayloadStack(cont == null ? Blocks.router : cont, number);
+                }
+
                 //try to parse "liquid/amount" syntax
                 if(jsonData.isString() && jsonData.asString().contains("/")){
                     String[] split = jsonData.asString().split("/");
@@ -355,6 +359,11 @@ public class ContentParser{
                     }else if(type == ConsumeLiquid.class){
                         return (T)fromJson(ConsumeLiquid.class, "{liquid: " + split[0] + ", amount: " + split[1] + "}");
                     }
+                }
+
+                //try to parse Rect as array
+                if(type == Rect.class && jsonData.isArray() && jsonData.size == 4){
+                    return (T)new Rect(jsonData.get(0).asFloat(), jsonData.get(1).asFloat(), jsonData.get(2).asFloat(), jsonData.get(3).asFloat());
                 }
 
                 if(Content.class.isAssignableFrom(type)){
@@ -547,11 +556,21 @@ public class ContentParser{
 
             if(!value.has("sector") || !value.get("sector").isNumber()) throw new RuntimeException("SectorPresets must have a sector number.");
 
-            SectorPreset out = new SectorPreset(name, locate(ContentType.planet, value.getString("planet", "serpulo")), value.getInt("sector"));
-            value.remove("sector");
-            value.remove("planet");
+            SectorPreset out = new SectorPreset(name);
+
             currentContent = out;
-            read(() -> readFields(out, value));
+            read(() -> {
+                Planet planet = locate(ContentType.planet, value.getString("planet", "serpulo"));
+
+                if(planet == null) throw new RuntimeException("Planet '" + value.getString("planet") + "' not found.");
+
+                out.initialize(planet, value.getInt("sector", 0));
+
+                value.remove("sector");
+                value.remove("planet");
+
+                readFields(out, value);
+            });
             return out;
         },
         ContentType.planet, (TypeParser<Planet>)(mod, name, value) -> {
@@ -561,7 +580,18 @@ public class ContentParser{
             Planet planet = new Planet(name, parent, value.getFloat("radius", 1f), value.getInt("sectorSize", 0));
 
             if(value.has("mesh")){
-                planet.meshLoader = () -> parser.readValue(GenericMesh.class, value.get("mesh"));
+                var mesh = value.get("mesh");
+                if(!mesh.isObject()) throw new RuntimeException("Meshes must be objects.");
+                value.remove("mesh");
+                planet.meshLoader = () -> {
+                    //don't crash, just log an error
+                    try{
+                        return parseMesh(planet, mesh);
+                    }catch(Exception e){
+                        Log.err(e);
+                        return new ShaderSphereMesh(planet, Shaders.unlit, 2);
+                    }
+                };
             }
 
             //always one sector right now...
@@ -788,6 +818,24 @@ public class ContentParser{
         return null;
     }
 
+    private GenericMesh parseMesh(Planet planet, JsonValue data){
+        String tname = Strings.capitalize(data.getString("type", "NoiseMesh"));
+
+        return switch(tname){
+            //TODO NoiseMesh is bad
+            case "NoiseMesh" -> new NoiseMesh(planet,
+            data.getInt("seed", 0), data.getInt("divisions", 1), data.getFloat("radius", 1f),
+            data.getInt("octaves", 1), data.getFloat("persistence", 0.5f), data.getFloat("scale", 1f), data.getFloat("mag", 0.5f),
+            Color.valueOf(data.getString("color1", data.getString("color", "ffffff"))),
+            Color.valueOf(data.getString("color2", data.getString("color", "ffffff"))),
+            data.getInt("colorOct", 1), data.getFloat("colorPersistence", 0.5f), data.getFloat("colorScale", 1f),
+            data.getFloat("colorThreshold", 0.5f));
+            case "MultiMesh" -> new MultiMesh(parser.readValue(GenericMesh[].class, data.get("meshes")));
+            case "MatMesh" -> new MatMesh(parser.readValue(GenericMesh.class, data.get("mesh")), parser.readValue(Mat3D.class, data.get("mat")));
+            default -> throw new RuntimeException("Unknown mesh type: " + tname);
+        };
+    }
+
     <T> T make(Class<T> type){
         try{
             Constructor<T> cons = type.getDeclaredConstructor();
@@ -948,6 +996,10 @@ public class ContentParser{
 
                 if(customRequirements == null){
                     node.setupRequirements(unlock.researchRequirements());
+                }
+
+                if(research.has("planet")){
+                    node.planet = find(ContentType.planet, research.getString("planet"));
                 }
 
                 if(research.getBoolean("root", false)){

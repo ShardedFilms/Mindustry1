@@ -31,12 +31,12 @@ public class ItemTurret extends Turret{
         ammoTypes = ObjectMap.of(objects);
     }
 
-    /** Makes copies of all bullets and limits their range. */
+    /** Limits bullet range to this turret's range value. */
     public void limitRange(){
         limitRange(9f);
     }
 
-    /** Makes copies of all bullets and limits their range. */
+    /** Limits bullet range to this turret's range value. */
     public void limitRange(float margin){
         for(var entry : ammoTypes.entries()){
             limitRange(entry.value, margin);
@@ -75,6 +75,8 @@ public class ItemTurret extends Turret{
                 //don't display
             }
         });
+
+        ammoTypes.each((item, type) -> placeOverlapRange = Math.max(placeOverlapRange, range + type.rangeChange + placeOverlapMargin));
 
         super.init();
     }
@@ -134,6 +136,10 @@ public class ItemTurret extends Turret{
 
             if(item == Items.pyratite){
                 Events.fire(Trigger.flameAmmo);
+            }
+
+            if(totalAmmo == 0){
+                Events.fire(Trigger.resupplyTurret);
             }
 
             BulletType type = ammoTypes.get(item);

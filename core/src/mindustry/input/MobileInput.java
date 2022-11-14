@@ -90,7 +90,7 @@ public class MobileInput extends InputHandler implements GestureListener{
     void checkTargets(float x, float y){
         Unit unit = Units.closestEnemy(player.team(), x, y, 20f, u -> !u.dead);
 
-        if(unit != null){
+        if(unit != null && player.unit().type.canAttack){
             player.unit().mineTile = null;
             target = unit;
         }else{
@@ -275,11 +275,18 @@ public class MobileInput extends InputHandler implements GestureListener{
         });
 
         group.fill(t -> {
-            t.visible(() -> !showCancel() && block == null);
+            t.visible(() -> !showCancel() && block == null && !hasSchem());
             t.bottom().left();
             t.button("@command", Icon.units, Styles.squareTogglet, () -> {
                 commandMode = !commandMode;
-            }).width(155f).height(50f).margin(12f).checked(b -> commandMode);
+            }).width(155f).height(50f).margin(12f).checked(b -> commandMode).row();
+
+            //for better looking insets
+            t.rect((x, y, w, h) -> {
+                if(Core.scene.marginBottom > 0){
+                    Tex.paneRight.draw(x, 0, w, y);
+                }
+            }).fillX().row();
         });
 
         group.fill(t -> {
@@ -646,7 +653,7 @@ public class MobileInput extends InputHandler implements GestureListener{
         }else if(mode == breaking && validBreak(linked.x,linked.y) && !hasPlan(linked)){
             //add to selection queue if it's a valid BREAK position
             selectPlans.add(new BuildPlan(linked.x, linked.y));
-        }else if((commandMode && selectedUnits.size > 0) || commandBuild != null){
+        }else if((commandMode && selectedUnits.size > 0) || commandBuildings.size > 0){
             //handle selecting units with command mode
             commandTap(x, y);
         }else if(commandMode){
@@ -658,7 +665,7 @@ public class MobileInput extends InputHandler implements GestureListener{
                 payloadTarget = null;
 
                 //control a unit/block detected on first tap of double-tap
-                if(unitTapped != null && state.rules.possessionAllowed){
+                if(unitTapped != null && state.rules.possessionAllowed && unitTapped.isAI() && unitTapped.team == player.team() && !unitTapped.dead && unitTapped.type.playerControllable){
                     Call.unitControl(player, unitTapped);
                     recentRespawnTimer = 1f;
                 }else if(buildingTapped != null && state.rules.possessionAllowed){
@@ -715,6 +722,7 @@ public class MobileInput extends InputHandler implements GestureListener{
         selectedUnits.removeAll(u -> !u.isCommandable() || !u.isValid());
 
         if(!commandMode){
+            commandBuildings.clear();
             selectedUnits.clear();
         }
 
@@ -979,7 +987,7 @@ public class MobileInput extends InputHandler implements GestureListener{
         unit.hitbox(rect);
         rect.grow(4f);
 
-        player.boosting = collisions.overlapsTile(rect, unit.solidity()) || !unit.within(targetPos, 85f);
+        player.boosting = collisions.overlapsTile(rect, EntityCollisions::solid) || !unit.within(targetPos, 85f);
 
         unit.movePref(movement);
 
