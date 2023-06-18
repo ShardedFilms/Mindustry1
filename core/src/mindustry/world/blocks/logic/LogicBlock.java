@@ -73,6 +73,10 @@ public class LogicBlock extends Block{
                     link.name = "";
                     link.name = entity.findLinkName(lbuild.block);
                 }
+                //disable when unlinking
+                if(!link.active && lbuild.block.autoResetEnabled && lbuild.lastDisabler == entity){
+                    lbuild.enabled = true;
+                }
             }else{
                 entity.links.remove(l -> world.build(l.x, l.y) == lbuild);
                 entity.links.add(new LogicLink(x, y, entity.findLinkName(lbuild.block), true));
@@ -566,13 +570,12 @@ public class LogicBlock extends Block{
         }
 
         @Override
-        public void buildConfiguration(Table table){
-            if(!accessible()){
-                //go away
-                deselect();
-                return;
-            }
+        public boolean shouldShowConfigure(Player player){
+            return accessible();
+        }
 
+        @Override
+        public void buildConfiguration(Table table){
             table.button(Icon.pencil, Styles.cleari, () -> {
                 ui.logic.show(code, executor, privileged, code -> configure(compress(code, relativeConnections())));
             }).size(40);
